@@ -57,7 +57,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(visualization_msgs REQUIRED)
-find_package(pcl_ros REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
@@ -71,7 +71,7 @@ set(dependencies
   std_msgs
   std_srvs
   visualization_msgs
-  pcl_ros
+  tf2_ros
   pcl_conversions
   livox_ros_driver2
 )
