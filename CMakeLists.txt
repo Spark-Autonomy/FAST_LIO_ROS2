@@ -125,4 +125,17 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+if(BUILD_TESTING)
+  # The lidar_type 5 handler for the Livox driver PointCloud2 (anvil #975).
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_livox_pc2_handler test/test_livox_pc2_handler.cpp src/preprocess.cpp)
+  target_include_directories(test_livox_pc2_handler PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${PCL_INCLUDE_DIRS}
+  )
+  target_link_libraries(test_livox_pc2_handler ${PCL_LIBRARIES} Eigen3::Eigen)
+  ament_target_dependencies(test_livox_pc2_handler rclcpp sensor_msgs pcl_conversions livox_ros_driver2)
+endif()
+
 ament_package()
