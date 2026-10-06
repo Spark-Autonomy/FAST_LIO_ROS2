@@ -136,6 +136,11 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_livox_pc2_handler ${PCL_LIBRARIES} Eigen3::Eigen)
   ament_target_dependencies(test_livox_pc2_handler rclcpp sensor_msgs pcl_conversions livox_ros_driver2)
+
+  # The gravity-aligned start of the world frame (anvil #975 plan commit 4).
+  ament_add_gtest(test_gravity_align test/test_gravity_align.cpp)
+  target_include_directories(test_gravity_align PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${PCL_INCLUDE_DIRS})
+  target_link_libraries(test_gravity_align Eigen3::Eigen)
 endif()
 
 ament_package()
