@@ -2,6 +2,9 @@
 
 #include <pcl/common/common.h>
 
+#include <cstring>
+#include <limits>
+
 #define RETURN0 0x00
 #define RETURN0AND1 0x10
 
@@ -83,6 +86,10 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, Po
 
     case MID360:
       mid360_handler(msg);
+      break;
+
+    case LIVOX_PC2:
+      livox_pc2_handler(msg);
       break;
 
     default:
@@ -554,6 +561,103 @@ void Preprocess::mid360_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &
       pl_surf.push_back(std::move(added_pt));
     }
   }
+}
+
+namespace
+{
+// The livox_ros_driver2 PointCloud2 layout LivoxPointXyzrtlt (lddc.cpp InitPointcloud2MsgHeader).
+constexpr uint32_t kLivoxPc2PointStep = 26;
+
+bool livox_pc2_layout_ok(const sensor_msgs::msg::PointCloud2 &msg)
+{
+  using F = sensor_msgs::msg::PointField;
+  struct Expected
+  {
+    const char *name;
+    uint32_t offset;
+    uint8_t datatype;
+  };
+  static const Expected expected[] = {{"x", 0, F::FLOAT32},  {"y", 4, F::FLOAT32},    {"z", 8, F::FLOAT32},
+                                      {"intensity", 12, F::FLOAT32}, {"tag", 16, F::UINT8}, {"line", 17, F::UINT8},
+                                      {"timestamp", 18, F::FLOAT64}};
+  if (msg.point_step != kLivoxPc2PointStep || msg.is_bigendian || msg.fields.size() != 7)
+    return false;
+  for (const auto &e : expected)
+  {
+    bool found = false;
+    for (const auto &f : msg.fields)
+      found = found || (f.name == e.name && f.offset == e.offset && f.datatype == e.datatype && f.count == 1);
+    if (!found)
+      return false;
+  }
+  return msg.row_step == msg.width * kLivoxPc2PointStep &&
+         msg.data.size() >= size_t(msg.row_step) * msg.height;
+}
+}  // namespace
+
+// Reads the driver PointCloud2 directly, so no PointCloud2 to CustomMsg converter is needed (anvil #975 option B).
+// Selection order matches that converter followed by avia_handler: range crop [blind, max_range], then line and
+// tag, then every point_filter_num-th valid point. A cloud of any other layout is dropped.
+void Preprocess::livox_pc2_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
+{
+  pl_surf.clear();
+  pl_corn.clear();
+  pl_full.clear();
+
+  if (!livox_pc2_layout_ok(*msg))
+  {
+    if (!livox_pc2_layout_reported)
+      fprintf(stderr, "livox_pc2_handler: the cloud is not the Livox PointCloud2 layout, clouds are dropped\n");
+    livox_pc2_layout_reported = true;
+    return;
+  }
+  livox_pc2_layout_reported = false;
+
+  const size_t n = size_t(msg->width) * msg->height;
+  const uint8_t *d = msg->data.data();
+  // Point timestamps are absolute ns; the header stamp is the packet base time in ns.
+  const double t_base_ns = double(msg->header.stamp.sec) * 1e9 + double(msg->header.stamp.nanosec);
+  const float min2 = blind * blind;
+  const float max2 = max_range > 0 ? max_range * max_range : std::numeric_limits<float>::max();
+  pl_surf.reserve(n / point_filter_num + 1);
+  unsigned valid_num = 0;
+  size_t i_latest = 0;
+  float t_latest = -std::numeric_limits<float>::max();
+  for (size_t i = 0; i < n; ++i)
+  {
+    const uint8_t *p = d + i * kLivoxPc2PointStep;
+    float xyz[3];
+    memcpy(xyz, p, sizeof(xyz));
+    const float r2 = xyz[0] * xyz[0] + xyz[1] * xyz[1] + xyz[2] * xyz[2];
+    if (r2 < min2 || r2 > max2)
+      continue;
+    const uint8_t tag = p[16], line = p[17];
+    if (line >= N_SCANS || ((tag & 0x30) != 0x10 && (tag & 0x30) != 0x00))
+      continue;
+    if (++valid_num % point_filter_num != 0)
+      continue;
+    float intensity;
+    double t_ns;
+    memcpy(&intensity, p + 12, sizeof(intensity));
+    memcpy(&t_ns, p + 18, sizeof(t_ns));
+    PointType pt;
+    pt.x = xyz[0];
+    pt.y = xyz[1];
+    pt.z = xyz[2];
+    pt.intensity = intensity;
+    pt.normal_x = pt.normal_y = pt.normal_z = 0;
+    pt.curvature = float((t_ns - t_base_ns) * 1e-6);  // offset time in ms
+    if (pt.curvature > t_latest)
+    {
+      t_latest = pt.curvature;
+      i_latest = pl_surf.size();
+    }
+    pl_surf.push_back(pt);
+  }
+  // sync_packages reads points.back().curvature as the scan end time (laserMapping.cpp sync_packages), before
+  // UndistortPcl sorts by time. The driver order is not strictly by time, so the latest point goes last.
+  if (!pl_surf.empty())
+    std::swap(pl_surf.points[i_latest], pl_surf.points.back());
 }
 
 void Preprocess::default_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)

@@ -16,7 +16,8 @@ enum LID_TYPE
   AVIA = 1,
   VELO16,
   OUST64,
-  MID360
+  MID360,
+  LIVOX_PC2 = 5  // Livox driver PointCloud2, LivoxPointXyzrtlt layout
 };  //{1, 2, 3}
 enum TIME_UNIT
 {
@@ -169,11 +170,14 @@ class Preprocess
   float time_unit_scale;
   int lidar_type, point_filter_num, N_SCANS, SCAN_RATE, time_unit;
   double blind;
+  double max_range = 0.0;  // LIVOX_PC2 only: drop points beyond this range in m; 0 disables the limit
   bool feature_enabled, given_offset_time;
   // ros::Publisher pub_full, pub_surf, pub_corn;
 
 private:
   void avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg);
+  void livox_pc2_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
+  bool livox_pc2_layout_reported = false;
   void oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
   void velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
   void mid360_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
